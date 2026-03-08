@@ -48,26 +48,6 @@ object SyncLib : ModInitializer {
 
 		// 同期機能の初期化
 		SyncHelper
-
-
-
-		// テストデータの登録
-		val registry = SyncHelper.createRegistry(
-			id = ResourceLocation.fromNamespaceAndPath(MOD_ID, "example"),
-			serializer = TestData.serializer(),
-			obfuscatedServerSide = false,
-            obfuscatedClientSide = true,
-            onRegister = { it },
-            onUnregister = {}
-		)
-		// サーバー側だけテスト用のデータを登録 (クライアント側には登録しない)
-		ServerLifecycleEvents.SERVER_STARTING.register { server ->
-			(1..10000).forEach { count ->
-				registry.register("test_$count", TestData("test_$count"))
-			}
-		}
-		LOGGER.info("[Debug] Registered ${registry.getSize()} entries to example registry.")
-
 	}
 
 }
