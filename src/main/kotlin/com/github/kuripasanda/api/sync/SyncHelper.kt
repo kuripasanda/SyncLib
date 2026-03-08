@@ -78,24 +78,22 @@ object SyncHelper {
 
 
     /**
-     * 新しい同期レジストリを作成します
-     * @param id レジストリの識別子。通常は 「modid:registry_name」 の形式で指定されます
-     * @param serializer 同期対象のデータをシリアライズ/デシリアライズするためのKSerializer
-     * @param obfuscatedServerSide 同期対象のデータがサーバー側で難読化されているか・すべきかどうかを示すフラグ
-     * @param obfuscatedClientSide 同期対象のデータがクライアント側で難読化されているか・すべきかどうかを示すフラグ
-     * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。登録されるデータを編集することができます。
+     * 新しい同期レジストリを作成して登録します
+     * @param T 同期対象のデータの型
+     * @param id レジストリの識別子。通常は 「modid:registry_name」 の形式で指定されます。
+     * @param serializer 同期対象のデータをシリアライズ/デシリアライズするためのKSerializer。
+     * @param obfuscatedClientSide データをキャッシュする際にクライアント側で難読化するかどうか。trueの場合、キャッシュファイルに保存されるデータは難読化されます。falseの場合、キャッシュファイルに保存されるデータは平文のJSON形式になります。
+     * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。
      * @param onUnregister データがレジストリから削除されたときに呼び出されるコールバック関数。
-     * @return 作成されたSyncRegistryのインスタンス
      */
     fun <T: Any> createRegistry(
         id: ResourceLocation,
         serializer: KSerializer<T>,
-        obfuscatedServerSide: Boolean,
         obfuscatedClientSide: Boolean,
         onRegister: (T) -> T = { it },
         onUnregister: (T) -> Unit = {}
     ): SyncRegistry<T> {
-        val registry = SyncRegistry<T>(id, serializer, obfuscatedServerSide, obfuscatedClientSide, onRegister, onUnregister)
+        val registry = SyncRegistry<T>(id, serializer, obfuscatedClientSide, onRegister, onUnregister)
         registries.put(id, registry)
         return registry
     }

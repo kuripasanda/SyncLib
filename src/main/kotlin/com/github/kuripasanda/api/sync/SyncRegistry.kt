@@ -6,6 +6,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import net.fabricmc.api.EnvType
+import net.fabricmc.api.Environment
 import net.minecraft.resources.ResourceLocation
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.jvm.Throws
@@ -15,15 +16,13 @@ import kotlin.jvm.Throws
  * @param T 同期対象のデータの型
  * @param id レジストリの識別子。通常は 「modid:registry_name」 の形式で指定されます。
  * @param serializer 同期対象のデータをシリアライズ/デシリアライズするためのKSerializer。
- * @param obfuscatedServerSide 同期対象のデータがサーバー側で難読化されているか・すべきかどうかを示すフラグ。
- * @param obfuscatedClientSide 同期対象のデータがクライアント側で難読化されているか・すべきかどうかを示すフラグ。
- * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。登録されるデータを編集することができます。
+ * @param obfuscatedClientSide データをキャッシュする際にクライアント側で難読化するかどうか。trueの場合、キャッシュファイルに保存されるデータは難読化されます。falseの場合、キャッシュファイルに保存されるデータは平文のJSON形式になります。
+ * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。
  * @param onUnregister データがレジストリから削除されたときに呼び出されるコールバック関数。
  */
 class SyncRegistry<T: Any>(
     val id: ResourceLocation,
     val serializer: KSerializer<T>,
-    val obfuscatedServerSide: Boolean,
     val obfuscatedClientSide: Boolean,
     var onRegister: (T) -> T,
     var onUnregister: (T) -> Unit
@@ -43,6 +42,7 @@ class SyncRegistry<T: Any>(
      * レジストリにデータをキーで登録します。既に同じキーが存在する場合は上書きされます。
      * ※主にSyncLib内部で使用するメソッドです。
      */
+    @Environment(EnvType.CLIENT)
     fun registerFromByteArray(key: String, bytes: ByteArray) {
         val data = fromByteArray(bytes)
         register(key, data)
@@ -57,6 +57,7 @@ class SyncRegistry<T: Any>(
      * @throws SerializationException 復号特有の誤りが発生した場合
      * @throws IllegalArgumentException デコード入力が有効なインスタンスでない場合
      */
+    @Environment(EnvType.CLIENT)
     fun registerFromCacheFile(serverId: String, key: String, environment: EnvType) {
         val data = loadCacheFromFile(serverId, key, environment)
         register(key, data)
@@ -115,6 +116,7 @@ class SyncRegistry<T: Any>(
      * @param environment 実行している環境
      * @throws NoSuchElementException 指定されたキーがレジストリ内に存在しない場合にスローされます。
      */
+    @Environment(EnvType.CLIENT)
     @Throws(NoSuchElementException::class)
     fun saveCacheToFile(serverId: String, key: String, environment: EnvType) {
         val element = dataMap[key] ?: throw NoSuchElementException("Key '$key' not found in registry '${id}'.")
@@ -138,6 +140,7 @@ class SyncRegistry<T: Any>(
      * @throws SerializationException 復号特有の誤りが発生した場合
      * @throws IllegalArgumentException デコード入力が有効なインスタンスでない場合
      */
+    @Environment(EnvType.CLIENT)
     @Throws(NoSuchFileException::class, SerializationException::class, IllegalArgumentException::class)
     fun loadCacheFromFile(serverId: String, key: String, environment: EnvType): T {
         val cacheDir = SyncHelper.getCacheDir(serverId)!!.resolve("${id.namespace}/${id.path}/")
@@ -146,7 +149,7 @@ class SyncRegistry<T: Any>(
         if (!cacheFile.isFile) throw NoSuchFileException(cacheFile, reason = "Cache file for key '$key' in registry '${id}' is not a file.")
 
         val cachedText = cacheFile.readText()
-        val needObfuscation = if (environment == EnvType.SERVER) obfuscatedServerSide else obfuscatedClientSide
+        val needObfuscation = if (environment == EnvType.SERVER) false else obfuscatedClientSide
         val finalText = if (needObfuscation) SyncLib.obfuscator.deobfuscate(cachedText) else cachedText
         return Json.decodeFromString(serializer, finalText)
     }
