@@ -1,6 +1,9 @@
+
+https://github.com/user-attachments/assets/61ab2f3c-a723-4e7c-9c3c-b8ec93927479
+
 # SyncLib
 サーバー・クライアント間のデータ同期を手軽に行えるようにする簡易的なライブラリです。  
-※個人用・所属するプロジェクト用に開発したものですので、バグ等が発生したとしても自己責任でお願いします。  
+※個人用・所属するプロジェクト用に開発したものですので、バグ等が発生したとしても自己責任でお願いします。バグ修正については Issue を作成して頂ければ対応するかもです。
 
 ## 依存関係
 
@@ -53,7 +56,7 @@ val exampleDataRegistry = SyncHelper.createRegistry(
   id = ResourceLocation.fromNamespaceAndPath(MOD_ID, "example"), // レジストリのID
   serializer = ExampleData.serializer(), // 同期対象のデータのシリアライザ
   obfuscatedClientSide = false, // クライアント側でキャッシュする際に難読化するかどうか
-  onRegister = { newData -> newData }, // データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。
+  onRegister = { registry, key, newData -> newData }, // データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。
   onUnregister = { data -> } // データがレジストリから削除されたときに呼び出されるコールバック関数。
 )
 ```
