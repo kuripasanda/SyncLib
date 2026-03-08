@@ -1,14 +1,12 @@
 package com.github.kuripasanda.api.sync
 
 import com.github.kuripasanda.SyncLib
-import dev.eav.tomlkt.Toml
 import kotlinx.io.IOException
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import net.fabricmc.api.EnvType
 import net.minecraft.resources.ResourceLocation
-import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.jvm.Throws
 
@@ -96,15 +94,15 @@ class SyncRegistry<T: Any>(
         return result
     }
 
-    /** データのハッシュ値を計算します。データはToml形式でシリアライズされ、そのバイト列のSHA-256ハッシュが計算されます。 */
+    /** データのハッシュ値を計算します。データはJson形式でシリアライズされ、そのバイト列のSHA-256ハッシュが計算されます。 */
     fun calculateHash(key: String): String? {
         val data = dataMap[key] ?: return null
         return calculateHash(data)
     }
 
-    /** データのハッシュ値を計算します。データはToml形式でシリアライズされ、そのバイト列のSHA-256ハッシュが計算されます。 */
+    /** データのハッシュ値を計算します。データはJson形式でシリアライズされ、そのバイト列のSHA-256ハッシュが計算されます。 */
     fun calculateHash(data: T): String {
-        val serialized = Toml.encodeToString(serializer, data)
+        val serialized = Json.encodeToString(serializer, data)
         val hashBytes = SyncLib.digest.digest(serialized.toByteArray())
         return hashBytes.joinToString("") { "%02x".format(it) }
     }
@@ -124,9 +122,9 @@ class SyncRegistry<T: Any>(
         cacheDir.toFile().mkdirs()
 
         val cacheFile = cacheDir.resolve("$key.cache").toFile()
-        val tomlPlaneText = Toml.encodeToString(serializer, element)
-        val needObfuscation = if (environment == EnvType.SERVER) obfuscatedServerSide else obfuscatedClientSide
-        val finalText = if (needObfuscation) SyncLib.obfuscator.obfuscate(tomlPlaneText) else tomlPlaneText
+        val jsonPlaneText = Json.encodeToString(serializer, element)
+        val needObfuscation = if (environment == EnvType.SERVER) false else obfuscatedClientSide
+        val finalText = if (needObfuscation) SyncLib.obfuscator.obfuscate(jsonPlaneText) else jsonPlaneText
         cacheFile.writeText(finalText)
     }
 
@@ -150,7 +148,7 @@ class SyncRegistry<T: Any>(
         val cachedText = cacheFile.readText()
         val needObfuscation = if (environment == EnvType.SERVER) obfuscatedServerSide else obfuscatedClientSide
         val finalText = if (needObfuscation) SyncLib.obfuscator.deobfuscate(cachedText) else cachedText
-        return Toml.decodeFromString(serializer, finalText)
+        return Json.decodeFromString(serializer, finalText)
     }
 
     /**

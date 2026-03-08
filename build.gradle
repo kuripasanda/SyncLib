@@ -44,8 +44,7 @@ dependencies {
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 	modImplementation "net.fabricmc:fabric-language-kotlin:${project.fabric_kotlin_version}"
 
-	// TOMLのパーサー
-	implementation "dev.eav.tomlkt:tomlkt:0.6.0"
+	// Kotlinx Serialization
 	implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0"
 
 	// OwoLib
