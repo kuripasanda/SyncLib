@@ -1,0 +1,120 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+	id "org.jetbrains.kotlin.jvm" version "2.3.10"
+	id "org.jetbrains.kotlin.plugin.serialization" version "2.3.10"
+	id "org.jetbrains.kotlin.kapt" version "2.1.0"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"synclib" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+
+}
+
+repositories {
+	maven { url = uri("https://maven.wispforest.io/releases/") }
+	maven { url = uri("https://jitpack.io") }
+}
+
+dependencies {
+	// To change the versions see the gradle.properties file
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.layered {
+		officialMojangMappings()
+		parchment("org.parchmentmc.data:parchment-${project.minecraft_version}:${project.parchment_version}@zip")
+	}
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	// Fabric API. This is technically optional, but you probably want it anyway.
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	modImplementation "net.fabricmc:fabric-language-kotlin:${project.fabric_kotlin_version}"
+
+	// TOMLのパーサー
+	implementation "dev.eav.tomlkt:tomlkt:0.6.0"
+	implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0"
+
+	// OwoLib
+	modImplementation "io.wispforest:owo-lib:${project.owo_version}"
+	include "io.wispforest:owo-sentinel:${project.owo_version}"
+	kapt modImplementation("io.wispforest:owo-lib:${project.owo_version}")
+}
+
+def owoVersion = project.owo_version
+processResources {
+	inputs.property "version", project.version
+	inputs.property "owo_version", owoVersion
+
+	filesMatching("fabric.mod.json") {
+		expand "version": inputs.properties.version,
+				"owo_version": owoVersion
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+kotlin {
+	compilerOptions {
+		jvmTarget = JvmTarget.JVM_21
+	}
+}
+
+java {
+	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
+	// if it is present.
+	// If you remove this line, sources will not be generated.
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	inputs.property "archivesName", project.base.archivesName
+
+	from("LICENSE") {
+		rename { "${it}_${inputs.properties.archivesName}"}
+	}
+}
+
+afterEvaluate {
+	kapt {
+		arguments {
+			// 1. mappingsFile からパスを取得 (Property型かFile型かを判定)
+			def mappingFile = loom.mappingsFile
+			def mappingPath = (mappingFile instanceof org.gradle.api.provider.Provider)
+					? mappingFile.get().asFile.canonicalPath
+					: mappingFile.canonicalPath
+			arg("inMapFileNamedIntermediary", mappingPath)
+
+			// 2. Mixinの書き出し先 (mappingsMixinExport は通常内部APIなので代替手段を使用)
+			// もし特定のファイルが必要なら直接パスを指定するか、Loomのプロパティを参照します
+			arg("outMapFileNamedIntermediary", mappingPath)
+
+			// 3. Refmapの出力先
+			String refmapName = loom.mixin.defaultRefmapName.get()
+			// layout.buildDirectory を使ってパスを解決
+			File refmapFile = new File(layout.buildDirectory.get().asFile, "resources/main/${refmapName}")
+			arg("outRefMapFile", refmapFile.canonicalPath)
+
+			arg("defaultObfuscationEnv", "named:intermediary")
+		}
+		includeCompileClasspath = false
+	}
+}

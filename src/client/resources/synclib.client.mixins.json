@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.github.kuripasanda.mixin.client",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ConnectScreenMixin",
+    "ExampleClientMixin",
+    "MinecraftMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+	}
+}
