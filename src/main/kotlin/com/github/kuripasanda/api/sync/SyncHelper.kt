@@ -12,10 +12,12 @@ import net.fabricmc.api.EnvType
 import net.fabricmc.api.Environment
 import net.fabricmc.fabric.api.networking.v1.ServerConfigurationConnectionEvents
 import net.fabricmc.fabric.api.networking.v1.ServerConfigurationNetworking
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.minecraft.network.chat.Component
 import net.minecraft.network.protocol.Packet
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.ResourceLocation
+import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.network.ConfigurationTask
 import net.minecraft.server.network.ServerConfigurationPacketListenerImpl
 import net.minecraft.util.CommonColors
@@ -83,14 +85,14 @@ object SyncHelper {
      * @param id レジストリの識別子。通常は 「modid:registry_name」 の形式で指定されます。
      * @param serializer 同期対象のデータをシリアライズ/デシリアライズするためのKSerializer。
      * @param obfuscatedClientSide データをキャッシュする際にクライアント側で難読化するかどうか。trueの場合、キャッシュファイルに保存されるデータは難読化されます。falseの場合、キャッシュファイルに保存されるデータは平文のJSON形式になります。
-     * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。
+     * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。 (registry: 登録先のレジストリ、 key: 登録される要素のキー、 data: 登録される予定のデータ)
      * @param onUnregister データがレジストリから削除されたときに呼び出されるコールバック関数。
      */
     fun <T: Any> createRegistry(
         id: ResourceLocation,
         serializer: KSerializer<T>,
         obfuscatedClientSide: Boolean,
-        onRegister: (T) -> T = { it },
+        onRegister: (SyncRegistry<T>, String, T) -> T = { registry, key, data -> data },
         onUnregister: (T) -> Unit = {}
     ): SyncRegistry<T> {
         val registry = SyncRegistry<T>(id, serializer, obfuscatedClientSide, onRegister, onUnregister)
@@ -116,6 +118,14 @@ object SyncHelper {
      * @param serverId サーバーID
      */
     fun getCacheDir(serverId: String): Path? = SyncLib.cacheDir?.resolve("${serverId}/registries/")
+
+
+    /** クライアントに特定のレジストリ要素のデータを送信します */
+    fun sendRegistryElement(player: ServerPlayer, registry: SyncRegistry<*>, elementId: String) {
+        val elementByteArray = registry.getAsByteArray(elementId) ?: throw IllegalStateException("Requested element $elementId not found in registry ${registry.id}.")
+        val packet = SyncLibRegistryElementS2CPacket(registry.id, elementId, elementByteArray)
+        ServerPlayNetworking.send(player, packet)
+    }
 
 
     /**
@@ -257,6 +267,13 @@ object SyncHelper {
                 // 各レジストリのハッシュ値を分割して送信する
                 hashes.forEach { registryId, registryHashes ->
                     val splitHashes = SplitPacketUtil.splitStringMap(registryHashes)
+
+                    if (splitHashes.isEmpty()) {
+                        // ハッシュ値が空の場合でも、クライアントに送信して存在を知らせる
+                        val packet = SyncLibRegistryHashesS2CPacket(SyncLibRegistryHashesS2CPacket.Data(registryId, emptyMap()))
+                        sendPacket.accept(ServerConfigurationNetworking.createS2CPacket(packet))
+                        return@forEach
+                    }
 
                     splitHashes.forEach { splitPairs ->
                         val splitHashes: Map<String, String> = splitPairs.associate { it.first to it.second }

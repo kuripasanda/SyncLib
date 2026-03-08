@@ -24,7 +24,7 @@ class SyncRegistry<T: Any>(
     val id: ResourceLocation,
     val serializer: KSerializer<T>,
     val obfuscatedClientSide: Boolean,
-    var onRegister: (T) -> T,
+    var onRegister: (SyncRegistry<T>, String, T) -> T,
     var onUnregister: (T) -> Unit
 ) {
 
@@ -34,8 +34,11 @@ class SyncRegistry<T: Any>(
 
     /** レジストリにデータをキーで登録します。既に同じキーが存在する場合は上書きされます。 */
     fun register(key: String, data: T) {
-        val result = onRegister.invoke(data)
+        val result = onRegister.invoke(this, key, data)
         dataMap[key] = result
+
+        // データが登録された後の管理用コールバックを呼び出す
+        SyncLib.registryOnRegisterForManagement.invoke(this, key, result)
     }
 
     /**

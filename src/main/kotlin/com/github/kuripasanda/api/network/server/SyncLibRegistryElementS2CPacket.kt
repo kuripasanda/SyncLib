@@ -36,6 +36,7 @@ class SyncLibRegistryElementS2CPacket(
         init {
             // パケットの登録
             PayloadTypeRegistry.configurationS2C().register(ID, CODEC)
+            PayloadTypeRegistry.playS2C().register(ID, CODEC)
         }
 
     }

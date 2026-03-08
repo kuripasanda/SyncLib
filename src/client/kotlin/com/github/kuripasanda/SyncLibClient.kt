@@ -19,6 +19,7 @@ object SyncLibClient : ClientModInitializer {
 
 		// クライアント側のキャッシュ管理の初期化
 		ClientCacheHelper
+
 	}
 
 }

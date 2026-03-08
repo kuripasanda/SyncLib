@@ -4,10 +4,10 @@ import com.github.kuripasanda.api.network.SyncLibNetworkHelper
 import com.github.kuripasanda.api.obfuscate.EasyObfuscatorImpl
 import com.github.kuripasanda.api.obfuscate.Obfuscator
 import com.github.kuripasanda.api.sync.SyncHelper
+import com.github.kuripasanda.api.sync.SyncRegistry
 import com.github.kuripasanda.config.SyncLibConfigs
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
-import net.minecraft.resources.ResourceLocation
 import net.minecraft.server.MinecraftServer
 import org.slf4j.LoggerFactory
 import java.nio.file.Path
@@ -23,6 +23,9 @@ object SyncLib : ModInitializer {
 	lateinit var server: MinecraftServer private set
 	lateinit var obfuscator: Obfuscator private set
 
+	var registryOnRegisterForManagement = { registry: SyncRegistry<*>, elementId: String, data: Any -> }
+		private set
+
 	fun setObfuscateKey(key: String) {
 		obfuscator = EasyObfuscatorImpl(key)
 	}
@@ -37,6 +40,14 @@ object SyncLib : ModInitializer {
 			this.server = server
 
 			cacheDir = server.serverDirectory.resolve("cache/${MOD_ID}/")
+
+			registryOnRegisterForManagement = { registry, elementId, data ->
+				// 全プレイヤーにレジストリの要素の変更を同期
+				SyncLib.server.playerList.players.forEach { player ->
+					SyncHelper.sendRegistryElement(player, registry, elementId)
+				}
+			}
+
 		}
 
 		// 難読化ツールの初期化
@@ -48,6 +59,7 @@ object SyncLib : ModInitializer {
 
 		// 同期機能の初期化
 		SyncHelper
+
 	}
 
 }

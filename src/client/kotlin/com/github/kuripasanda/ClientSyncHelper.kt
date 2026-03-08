@@ -4,12 +4,13 @@ import com.github.kuripasanda.api.network.SplitPacketUtil
 import com.github.kuripasanda.api.network.client.SyncLibClientSyncCompleteC2SPacket
 import com.github.kuripasanda.api.network.client.SyncLibRequestRegistryElementC2SPacket
 import com.github.kuripasanda.api.sync.SyncHelper
+import com.github.kuripasanda.mixin.client.ConnectScreenAccessor
 import net.fabricmc.api.EnvType
 import net.fabricmc.fabric.api.client.networking.v1.ClientConfigurationConnectionEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientConfigurationNetworking
 import net.minecraft.client.Minecraft
+import net.minecraft.client.gui.screens.ConnectScreen
 import net.minecraft.client.gui.screens.DisconnectedScreen
-import net.minecraft.client.gui.screens.MenuScreens
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen
 import net.minecraft.network.chat.Component
@@ -23,20 +24,26 @@ import kotlin.time.Instant
 
 object ClientSyncHelper {
 
+    /** 初回のデータ同期中であるかを示します */
+    var isInitialSync: Boolean = false
+        private set
+
+    /* 初回の同期処理に関する変数 */
     private var startTime: Instant? = null
     private var registryHashes: ConcurrentHashMap<ResourceLocation, ConcurrentHashMap<String, String>> = ConcurrentHashMap()
-
-    private var elementRegisterThread: Thread? = null
     private var receivedElements: ConcurrentLinkedQueue<ReceivedElement> = ConcurrentLinkedQueue()
     private var receivedAllElements = false
     private data class ReceivedElement(val registryId: ResourceLocation, val elementId: String, val elementData: ByteArray)
-
     private var integrityCheckThread: Thread? = null
-
     /* GUI表示用の変数 */
     private var requestedTotal: Long = 0
     private var receivedTotal: Long = 0
     private var receivedKiloBytes: Double = 0.0
+
+
+    /* 初回以降の同期処理に関する変数 */
+    private var elementRegisterThread: Thread = Thread {}
+
 
     init {
         // ClientConfigurationConnectionEvents.COMPLETE.register { handler, client -> reset() } 同期完了時は completeAllSyncTasks() 内でリセットする
@@ -44,6 +51,9 @@ object ClientSyncHelper {
     }
 
     fun startSync() {
+        elementRegisterThread.interrupt()
+        prepareRegistryElementRegisterThread()
+        isInitialSync = true
         startTime = Clock.System.now()
 
         // 同期開始前にキャッシュからデータを読み込む
@@ -62,13 +72,12 @@ object ClientSyncHelper {
     }
 
     fun reset() {
+        isInitialSync = false
         startTime = null
         registryHashes = ConcurrentHashMap()
         requestedTotal = 0
         receivedTotal = 0
         receivedKiloBytes = 0.0
-        elementRegisterThread?.interrupt()
-        receivedElements = ConcurrentLinkedQueue()
         receivedAllElements = false
         integrityCheckThread?.interrupt()
         SyncLibClient.connectScreenSubStatus = null
@@ -175,9 +184,6 @@ object ClientSyncHelper {
             }
             requestedTotal = requestRegistryElements.values.sumOf { it.size.toLong() }
 
-            // レジストリ要素の登録処理を行うスレッドを準備
-            prepareRegistryElementRegisterThread()
-
             // 全要素のリクエストが完了したことをサーバーに通知
             ClientConfigurationNetworking.send(SyncLibRequestRegistryElementC2SPacket.build(SyncHelper.REQUEST_REGISTRY_ELEMENTS_COMPLETE_MESSAGE_KEY, emptyList()))
         }
@@ -195,43 +201,6 @@ object ClientSyncHelper {
         receivedElements.add(ReceivedElement(registryId, elementId, elementData))
     }
 
-    /** 受け取ったレジストリ要素をクライアント側のレジストリに登録するためのスレッドを準備します。すでにスレッドが存在し、動作している場合は何もしません。 */
-    private fun prepareRegistryElementRegisterThread() {
-        if (elementRegisterThread != null && elementRegisterThread!!.isAlive) return
-
-        elementRegisterThread = Thread {
-            val serverId = SyncLibClientServerData.serverId ?: throw IllegalStateException("Server ID is null.")
-            while (!Thread.currentThread().isInterrupted) {
-                val element = receivedElements.firstOrNull()
-                if (element == null) {
-                    if (receivedAllElements) { // すべての要素を受け取った後、リストに残っている要素の処理が完了したらループを抜ける
-                        completeAllSyncTasks()
-                        break
-                    }
-                    Thread.sleep(10) // 要素がない場合は少し待ってから再度確認
-                    continue
-                }
-
-                receivedTotal++
-                receivedKiloBytes += element.elementData.size / 1024.0
-
-                val displayKiloBytes = round(receivedKiloBytes * 10)
-                SyncLibClient.connectScreenSubStatus = Component.translatable("synclib.gui.syncing.receive_data", receivedTotal, requestedTotal, displayKiloBytes)
-
-                try {
-                    val registry = SyncHelper.getRegistry(element.registryId) ?: throw IllegalStateException("Registry ${element.registryId} not found on client side.")
-                    registry.registerFromByteArray(element.elementId, element.elementData)
-                    registry.saveCacheToFile(serverId, element.elementId, EnvType.CLIENT)
-                }catch (e:Exception) {
-                    errorInSync(e)
-                }finally {
-                    receivedElements.remove(element)
-                }
-            }
-        }
-        elementRegisterThread!!.start()
-    }
-
     /** すべての同期タスクが完了したときに呼び出されます */
     private fun completeAllSyncTasks() {
         val totalTime = startTime?.let { Clock.System.now().minus(it).inWholeMilliseconds } ?: -1
@@ -244,12 +213,72 @@ object ClientSyncHelper {
         SyncLib.LOGGER.info("[Sync] All synchronization tasks are complete. (Total time: ${totalTime}ms)")
     }
 
+
+    /** 受け取ったレジストリ要素をクライアント側のレジストリに登録するためのスレッドを準備します。 */
+    private fun prepareRegistryElementRegisterThread() {
+        elementRegisterThread = Thread {
+            while (!Thread.currentThread().isInterrupted) {
+                val serverId = SyncLibClientServerData.serverId
+
+                // サーバーIDが取得できなければ停止する。
+                if (serverId == null) {
+                    if (isInitialSync) errorInSync(IllegalStateException("Server ID is null."))
+                    Thread.interrupted()
+                    break
+                }
+
+                val element = receivedElements.firstOrNull()
+                if (element == null) {
+                    // 初回の同期処理で、全データの受信が完了 & 受信したデータの処理が完了したら同期タスクを完了する
+                    if (isInitialSync && receivedAllElements) {
+                        completeAllSyncTasks()
+                    }
+                    Thread.sleep(500) // 要素がない場合は少し待ってから再度確認
+                    continue
+                }
+
+                // 初回の同期時は、GUIの表示を更新する
+                if (isInitialSync) {
+                    receivedTotal++
+                    receivedKiloBytes += element.elementData.size / 1024.0
+
+                    val displayKiloBytes = round(receivedKiloBytes * 10.0) / 10.0
+                    SyncLibClient.connectScreenSubStatus = Component.translatable("synclib.gui.syncing.receive_data", receivedTotal, requestedTotal, displayKiloBytes)
+                }
+
+                registerReceivedElement(serverId, element)
+            }
+        }.also {
+            it.name = "SyncLib Data Receiver"
+            it.start()
+        }
+    }
+    private fun registerReceivedElement(serverId: String, element: ReceivedElement) {
+        try {
+            val registry = SyncHelper.getRegistry(element.registryId) ?: throw IllegalStateException("Registry ${element.registryId} not found on client side.")
+            registry.registerFromByteArray(element.elementId, element.elementData)
+            registry.saveCacheToFile(serverId, element.elementId, EnvType.CLIENT)
+        }catch (e:Exception) {
+            errorInSync(e)
+        }finally {
+            receivedElements.remove(element)
+        }
+    }
+
     @Synchronized
     private fun errorInSync(e: Exception) {
         Minecraft.getInstance().execute {
-            Minecraft.getInstance().connection?.let { connection ->
-                connection.onDisconnect(connection.createDisconnectionInfo(SyncHelper.errorDisconnectMessage, e))
+            val currentScreen = Minecraft.getInstance().screen
+            if (currentScreen is ConnectScreen) {
+                val connectScreen = (currentScreen as ConnectScreenAccessor)
+
+                val channelFuture = connectScreen.channelFuture
+                val connection = connectScreen.connection
+
+                channelFuture?.cancel(true)
+                connection?.disconnect(SyncHelper.errorDisconnectMessage)
             }
+
             val screen = DisconnectedScreen(
                 JoinMultiplayerScreen(TitleScreen()),
                 Component.translatable("synclib.gui.syncing.error"),
@@ -259,5 +288,8 @@ object ClientSyncHelper {
         }
         SyncLib.LOGGER.error("[Sync] An error occurred during synchronization: ${e.message}", e)
     }
+
+
+
 
 }

@@ -7,6 +7,7 @@ import com.github.kuripasanda.api.network.server.SyncLibInitializeS2CPacket
 import com.github.kuripasanda.api.network.server.SyncLibRegistryElementS2CPacket
 import com.github.kuripasanda.api.network.server.SyncLibRegistryHashesS2CPacket
 import net.fabricmc.fabric.api.client.networking.v1.ClientConfigurationNetworking
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
 
 object SyncLibClientNetworkHelper {
 
@@ -31,6 +32,9 @@ object SyncLibClientNetworkHelper {
 
         // サーバーからレジストリ要素のデータを受け取るためのレシーバー
         ClientConfigurationNetworking.registerGlobalReceiver(SyncLibRegistryElementS2CPacket.ID) { packet, _ ->
+            ClientSyncHelper.onReceiveRegistryElement(packet.registryId, packet.elementKey, packet.registryElement)
+        }
+        ClientPlayNetworking.registerGlobalReceiver(SyncLibRegistryElementS2CPacket.ID) { packet, _ ->
             ClientSyncHelper.onReceiveRegistryElement(packet.registryId, packet.elementKey, packet.registryElement)
         }
     }

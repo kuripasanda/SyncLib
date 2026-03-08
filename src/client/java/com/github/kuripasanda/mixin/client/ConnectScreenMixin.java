@@ -2,6 +2,7 @@ package com.github.kuripasanda.mixin.client;
 
 import com.github.kuripasanda.SyncLibClient;
 import com.mojang.blaze3d.platform.Window;
+import io.netty.channel.ChannelFuture;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -9,7 +10,9 @@ import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;

@@ -3,9 +3,11 @@
   "package": "com.github.kuripasanda.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "ConnectScreenAccessor",
     "ConnectScreenMixin",
     "ExampleClientMixin",
-    "MinecraftMixin"
+    "MinecraftMixin",
+    "ConnectScreenAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
