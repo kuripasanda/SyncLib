@@ -6,7 +6,6 @@ import net.fabricmc.api.EnvType
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
-import kotlin.system.measureTimeMillis
 
 object ClientCacheHelper {
 
