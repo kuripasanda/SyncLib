@@ -3,19 +3,23 @@ https://github.com/user-attachments/assets/61ab2f3c-a723-4e7c-9c3c-b8ec93927479
 
 # SyncLib
 サーバー・クライアント間のデータ同期を手軽に行えるようにする簡易的なライブラリです。  
-※個人用・所属するプロジェクト用に開発したものですので、バグ等が発生したとしても自己責任でお願いします。バグ修正については Issue を作成して頂ければ対応するかもです。
+※個人用・所属するプロジェクト用に開発したものですので、バグ等が発生したとしても自己責任でお願いします。バグ修正については Issue を作成して頂ければ対応するかもです。  
 
-## 依存関係
-
-### 1. 前提MOD
+## 依存関係(MOD)
 このライブラリを使用する際は、サーバー・クライアント両方に以下のMODを導入してください。
 | MOD   | 備考  |
 | ----- | ----- |
 | owo-lib | SyncLibのコンフィグ生成に使用しています |
 | Fabric Kotlin Language | FabricModをKotlinで作成するために必須の前提MODです |
+  
 
-### 2. build.gradle
-自身のプロジェクトの `build.gradle`に [Kotlin Seriaization](https://github.com/Kotlin/kotlinx.serialization/tree/master?tab=readme-ov-file#gradle)を依存関係として追加する必要があります。
+  
+## 使用方法
+SyncLibを使用するには、各データ専用の**レジストリ**を作成し、そこに `@Serializable`アノテーションが適用されたデータ用のクラスを格納する必要があります。  
+
+### 1. build.gradle
+自身のプロジェクトの `build.gradle`に [Kotlin Seriaization](https://github.com/Kotlin/kotlinx.serialization/tree/master?tab=readme-ov-file#gradle)を依存関係として追加する必要があります。  
+SyncLibの最新バージョンは `0.2.0` です。
 ```groovy
 plugins {
     id 'org.jetbrains.kotlin.multiplatform' version '2.3.0'
@@ -24,17 +28,15 @@ plugins {
 
 repositories {
     mavenCentral()
+    maven { url = uri("https://jitpack.io") } // For SyncLib
 }
 
 dependencies {
     implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0"
+    modImplementation("com.github.kuripasanda:SyncLib:$syncLibVersion")
 }
 ```
-  
 
-  
-## 使用方法
-SyncLibを使用するには、各データ専用の**レジストリ**を作成し、そこに `@Serializable`アノテーションが適用されたデータ用のクラスを格納する必要があります。  
 
 ### 1. データ用のクラスを作成
 データはパケットで送信する前に[KotlinxSerialization](https://github.com/Kotlin/kotlinx.serialization)でJSONにパースしてから送信されます。  
