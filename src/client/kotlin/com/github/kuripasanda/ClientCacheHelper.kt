@@ -34,18 +34,22 @@ object ClientCacheHelper {
 
         SyncLib.LOGGER.info("[Cache] Loading registry elements from caches....")
         SyncHelper.getAllRegistries().forEach { registryId, registry ->
-            val registryDir = cacheDir.resolve("${registryId.namespace}/${registryId.path}")
-            if (!registryDir.exists() || !registryDir.isDirectory())  {
-                SyncLib.LOGGER.warn("[Cache] Cache directory for registry $registryId does not exist or is not a directory: ${registryDir.toAbsolutePath()}")
-                return@forEach
-            }
+            val finalRegistryId = registry.getRegistryIdObfuscated(EnvType.CLIENT)
+            val registryDir = cacheDir.resolve("${finalRegistryId.namespace}/${finalRegistryId.path}")
+            if (!registryDir.exists() || !registryDir.isDirectory()) return@forEach
 
             val elementFiles = registryDir.toFile().listFiles { file -> file.isFile && file.name.endsWith(".cache") } ?: arrayOf()
             elementFiles.forEach { file ->
                 try {
-                    val elementId = file.name.removeSuffix(".cache")
-                    registry.registerFromCacheFile(serverId, elementId, EnvType.CLIENT)
-                }catch (e: Exception) {
+                    val elementKey = file.name.removeSuffix(".cache")
+
+                    // クライアント側で難読化されている場合は、キーを復号化してから登録する
+                    val finalElementKey = if (registry.obfuscatedClientSide) {
+                        SyncLib.obfuscator.deobfuscate(elementKey)
+                    } else elementKey
+
+                    registry.registerFromCacheFile(serverId, finalElementKey, EnvType.CLIENT)
+                }catch (_: Exception) {
                     //SyncLib.LOGGER.error("[Cache] Failed to load registry element from cache file: ${file.absolutePath}", e)
                     // ログが大量に出力されるため、無視
                 }

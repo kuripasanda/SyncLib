@@ -1,6 +1,7 @@
 package com.github.kuripasanda.api.sync
 
 import com.github.kuripasanda.SyncLib
+import com.github.kuripasanda.api.obfuscate.ObfuscatedResourceLocation
 import kotlinx.io.IOException
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
@@ -8,6 +9,7 @@ import kotlinx.serialization.json.Json
 import net.fabricmc.api.EnvType
 import net.fabricmc.api.Environment
 import net.minecraft.resources.ResourceLocation
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.jvm.Throws
 
@@ -112,6 +114,15 @@ class SyncRegistry<T: Any>(
     }
 
     /**
+     * レジストリのキャッシュディレクトリのパスを返します。キャッシュディレクトリは、サーバーIDとレジストリIDに基づいて構築されます。
+     * サーバー環境では通常のレジストリIDを使用し、クライアント環境では難読化が有効であれば難読化されたレジストリIDを使用します。
+     */
+    fun getRegistryCacheDir(serverId: String): Path {
+        val registryId = getRegistryIdObfuscated(EnvType.CLIENT)
+        return SyncHelper.getCacheDir(serverId)!!.resolve("${registryId.namespace}/${registryId.path}")
+    }
+
+    /**
      * キーで指定されたレジストリ内の要素をキャッシュとしてファイルに保存します。
      * 難読化が有効になっていれば、保存するキャッシュデータは難読化処理を施したものになります。
      * @param serverId サーバーID
@@ -123,10 +134,13 @@ class SyncRegistry<T: Any>(
     @Throws(NoSuchElementException::class)
     fun saveCacheToFile(serverId: String, key: String, environment: EnvType) {
         val element = dataMap[key] ?: throw NoSuchElementException("Key '$key' not found in registry '${id}'.")
-        val cacheDir = SyncHelper.getCacheDir(serverId)!!.resolve("${id.namespace}/${id.path}/")
+        val cacheDir = getRegistryCacheDir(serverId)
         cacheDir.toFile().mkdirs()
 
-        val cacheFile = cacheDir.resolve("$key.cache").toFile()
+        // 難読化が有効であれば、キャッシュファイルの名前も難読化する
+        val finalKey = if (obfuscatedClientSide) SyncLib.obfuscator.obfuscate(key) else key
+
+        val cacheFile = cacheDir.resolve("$finalKey.cache").toFile()
         val jsonPlaneText = Json.encodeToString(serializer, element)
         val needObfuscation = if (environment == EnvType.SERVER) false else obfuscatedClientSide
         val finalText = if (needObfuscation) SyncLib.obfuscator.obfuscate(jsonPlaneText) else jsonPlaneText
@@ -146,8 +160,9 @@ class SyncRegistry<T: Any>(
     @Environment(EnvType.CLIENT)
     @Throws(NoSuchFileException::class, SerializationException::class, IllegalArgumentException::class)
     fun loadCacheFromFile(serverId: String, key: String, environment: EnvType): T {
-        val cacheDir = SyncHelper.getCacheDir(serverId)!!.resolve("${id.namespace}/${id.path}/")
-        val cacheFile = cacheDir.resolve("$key.cache").toFile()
+        val cacheDir = getRegistryCacheDir(serverId)
+        val finalKey = if (obfuscatedClientSide) SyncLib.obfuscator.obfuscate(key) else key
+        val cacheFile = cacheDir.resolve("$finalKey.cache").toFile()
         if (!cacheFile.exists()) throw NoSuchFileException(cacheFile, reason = "Cache file for key '$key' not found in registry '${id}'.")
         if (!cacheFile.isFile) throw NoSuchFileException(cacheFile, reason = "Cache file for key '$key' in registry '${id}' is not a file.")
 
@@ -164,6 +179,7 @@ class SyncRegistry<T: Any>(
      * @param key レジストリ内の要素のキー
      * @throws IOException ファイルの書き込みに失敗した場合にスローされます。
      */
+    @Environment(EnvType.CLIENT)
     @Throws(NoSuchElementException::class, IOException::class)
     fun deleteCacheFile(serverId: String, key: String) {
         val cacheDir = SyncHelper.getCacheDir(serverId)!!.resolve("${id.namespace}/${id.path}/")
@@ -172,15 +188,40 @@ class SyncRegistry<T: Any>(
     }
 
 
+    /**
+     * キーで指定されたレジストリ内の要素をバイト配列にシリアライズして返します。要素が存在しない場合はnullを返します。
+     * シリアライズされたデータはJson形式の文字列をバイト配列に変換したものになります。
+     */
     fun getAsByteArray(key: String): ByteArray? {
         val data = dataMap[key] ?: return null
         val json = Json.encodeToString(serializer, data)
         return json.toByteArray()
     }
 
+    /**
+     * バイト配列からデータをデシリアライズして返します。バイト配列はJson形式の文字列をバイト配列に変換したものになっている必要があります。
+     * @throws SerializationException デコード特有の誤りが発生した場合
+     * @throws IllegalArgumentException デコード入力が有効なインスタンスでない場合
+     */
+    @Throws(SerializationException::class, IllegalArgumentException::class)
     fun fromByteArray(bytes: ByteArray): T {
         val json = String(bytes)
         return Json.decodeFromString(serializer, json)
+    }
+
+    /**
+     * レジストリのIDを環境に応じて返します。
+     * サーバー環境では通常の識別子を返し、クライアント環境では難読化が有効であれば難読化された識別子を返します。
+     */
+    fun getRegistryIdObfuscated(environment: EnvType): ObfuscatedResourceLocation {
+        return when (environment) {
+            EnvType.SERVER -> ObfuscatedResourceLocation.fromResourceLocation(id)
+            EnvType.CLIENT -> {
+                val namespace = if (obfuscatedClientSide) SyncLib.obfuscator.obfuscate(id.namespace) else id.namespace
+                val path = if (obfuscatedClientSide) SyncLib.obfuscator.obfuscate(id.path) else id.path
+                ObfuscatedResourceLocation(namespace, path)
+            }
+        }
     }
 
 }
