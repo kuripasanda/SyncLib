@@ -6,7 +6,7 @@ import io.wispforest.owo.config.annotation.ExcludeFromScreen;
 import io.wispforest.owo.config.annotation.RestartRequired;
 import io.wispforest.owo.config.annotation.Sync;
 
-@Config(name = "config", wrapperName = "SyncLibServerConfig")
+@Config(name = "synclib", wrapperName = "SyncLibServerConfig")
 public class SyncLibServerConfigModel {
 
     /**

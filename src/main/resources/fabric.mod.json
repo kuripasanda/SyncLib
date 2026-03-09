@@ -40,6 +40,6 @@
 		"java": ">=21",
 		"fabric-api": "*",
 		"fabric-language-kotlin": "*",
-		"owo-lib": ">=${owo_version}"
+		"owo": ">=${owo_version}"
 	}
 }
