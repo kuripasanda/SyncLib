@@ -29,6 +29,7 @@ loom {
 repositories {
 	maven { url = uri("https://maven.wispforest.io/releases/") }
 	maven { url = uri("https://jitpack.io") }
+	maven { url = uri("https://maven.parchmentmc.org") }
 }
 
 dependencies {
