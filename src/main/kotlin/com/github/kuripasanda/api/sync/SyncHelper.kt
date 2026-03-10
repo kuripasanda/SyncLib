@@ -54,6 +54,8 @@ object SyncHelper {
     init {
         // プレイヤーが参加を要求後、サーバーから様々なデータを送信する際のイベント
         ServerConfigurationConnectionEvents.CONFIGURE.register { handler, server ->
+            if (!server.isDedicatedServer) return@register // シングルプレイヤーの場合は同期をスキップ
+
             try {
                 val owner = handler.owner
 
@@ -68,6 +70,8 @@ object SyncHelper {
             }
         }
         ServerConfigurationConnectionEvents.DISCONNECT.register { handler, server ->
+            if (!server.isDedicatedServer) return@register // シングルプレイヤーの場合は同期をスキップ
+
             // プレイヤーが切断されたときに同期状態をクリーンアップ
             val status = syncStatus[handler.owner.id]
             if (status != null) {
@@ -315,7 +319,6 @@ object SyncHelper {
         .append(Component.translatable("synclib.error.sync.1").withColor(CommonColors.SOFT_YELLOW))
         .append(Component.translatable("synclib.error.sync.2").withColor(CommonColors.SOFT_YELLOW))
     /** 同期中にエラーが発生したときの処理 */
-    @Environment(EnvType.SERVER)
     private fun errorInSyncing(handler: ServerConfigurationPacketListenerImpl, e: Exception) {
         handler.disconnect(errorDisconnectMessage)
         syncStatus.remove(handler.owner.id)
