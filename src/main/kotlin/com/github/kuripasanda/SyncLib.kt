@@ -20,7 +20,8 @@ object SyncLib : ModInitializer {
 	val digest = MessageDigest.getInstance("SHA-256")
 	var cacheDir: Path? = null
 
-	lateinit var server: MinecraftServer private set
+	var server: MinecraftServer? = null
+		private set
 	lateinit var obfuscator: Obfuscator private set
 
 	var registryOnRegisterForManagement = { registry: SyncRegistry<*>, elementId: String, data: Any -> }
@@ -36,20 +37,6 @@ object SyncLib : ModInitializer {
 		// 設定の初期化
 		SyncLibConfigs
 
-		ServerLifecycleEvents.SERVER_STARTING.register { server ->
-			this.server = server
-
-			cacheDir = server.serverDirectory.resolve("cache/${MOD_ID}/")
-
-			registryOnRegisterForManagement = { registry, elementId, data ->
-				// 全プレイヤーにレジストリの要素の変更を同期
-				SyncLib.server.playerList.players.forEach { player ->
-					SyncHelper.sendRegistryElement(player, registry, elementId)
-				}
-			}
-
-		}
-
 		// 難読化ツールの初期化
 		setObfuscateKey(SyncLibConfigs.serverConfig.obfuscateKey())
 
@@ -59,6 +46,25 @@ object SyncLib : ModInitializer {
 
 		// 同期機能の初期化
 		SyncHelper
+
+
+		ServerLifecycleEvents.SERVER_STARTING.register { server ->
+			this.server = server
+
+			cacheDir = server.serverDirectory.resolve("cache/${MOD_ID}/")
+
+			registryOnRegisterForManagement = { registry, elementId, data ->
+				try {
+					// 全プレイヤーにレジストリの要素の変更を同期
+					SyncLib.server?.playerList?.players?.forEach { player ->
+						SyncHelper.sendRegistryElement(player, registry, elementId)
+					}
+				}catch (e: Exception) {
+					LOGGER.error("Failed to send registry element to players! registryId: ${registry.id}, elementId: $elementId", e)
+				}
+			}
+
+		}
 
 	}
 
