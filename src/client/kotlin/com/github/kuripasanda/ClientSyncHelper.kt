@@ -3,7 +3,10 @@ package com.github.kuripasanda
 import com.github.kuripasanda.api.network.SplitPacketUtil
 import com.github.kuripasanda.api.network.client.SyncLibClientSyncCompleteC2SPacket
 import com.github.kuripasanda.api.network.client.SyncLibRequestRegistryElementC2SPacket
+import com.github.kuripasanda.api.sync.AbstractSyncRegistry
+import com.github.kuripasanda.api.sync.PlayerSyncRegistry
 import com.github.kuripasanda.api.sync.SyncHelper
+import com.github.kuripasanda.api.sync.SyncRegistry
 import com.github.kuripasanda.mixin.client.ConnectScreenAccessor
 import net.fabricmc.api.EnvType
 import net.fabricmc.fabric.api.client.networking.v1.ClientConfigurationConnectionEvents
@@ -35,6 +38,7 @@ object ClientSyncHelper {
     private var receivedAllElements = false
     private data class ReceivedElement(val registryId: ResourceLocation, val elementId: String, val elementData: ByteArray)
     private var integrityCheckThread: Thread? = null
+    private var loadCacheThread: Thread = Thread {}
     /* GUI表示用の変数 */
     private var requestedTotal: Long = 0
     private var receivedTotal: Long = 0
@@ -52,12 +56,13 @@ object ClientSyncHelper {
 
     fun startSync() {
         elementRegisterThread.interrupt()
+        loadCacheThread.interrupt()
         prepareRegistryElementRegisterThread()
         isInitialSync = true
         startTime = Clock.System.now()
 
         // 同期開始前にキャッシュからデータを読み込む
-        Thread {
+        loadCacheThread = Thread {
             try {
                 ClientCacheHelper.loadFromCaches()
             }catch (e: Exception) {
@@ -80,6 +85,7 @@ object ClientSyncHelper {
         receivedKiloBytes = 0.0
         receivedAllElements = false
         integrityCheckThread?.interrupt()
+        loadCacheThread.interrupt()
         SyncLibClient.connectScreenSubStatus = null
         SyncLib.LOGGER.info("[Sync] Reset synchronization state.")
     }
@@ -128,9 +134,9 @@ object ClientSyncHelper {
             registryHashes.forEach { registryId, serverSideHashes ->
                 val serverId = SyncLibClientServerData.serverId ?: throw IllegalStateException("Server ID is null.")
                 val registry = SyncHelper.getRegistry(registryId)
-                val clientSideHashes = registry?.calculateHashes()
+                val clientSideHashes = calculateRegistryHashes(registry)
                 val clientSideKeysTemp = clientSideHashes?.keys?.toMutableList() ?: mutableListOf()
-                if (clientSideHashes == null) { // クライアント側とサーバー側でレジストリが一致しない場合は例外を投げる
+                if (clientSideHashes == null || registry == null) { // クライアント側とサーバー側でレジストリが一致しない場合は例外を投げる
                     errorInSync(IllegalStateException("Registry $registryId is missing on the client side."))
                     return@forEach
                 }
@@ -155,7 +161,7 @@ object ClientSyncHelper {
                         try {
                             registry.deleteCacheFile(serverId, elementId) // キャッシュファイルの削除
                         }catch (e:Exception) { SyncLib.LOGGER.error("[Sync] Failed to delete cache file for registry $registryId element $elementId: ${e.message}", e) }
-                        registry.unregister(elementId)
+                        unregisterRegistryElement(registry, elementId)
                     }
                 }
             }
@@ -186,6 +192,25 @@ object ClientSyncHelper {
 
             // 全要素のリクエストが完了したことをサーバーに通知
             ClientConfigurationNetworking.send(SyncLibRequestRegistryElementC2SPacket.build(SyncHelper.REQUEST_REGISTRY_ELEMENTS_COMPLETE_MESSAGE_KEY, emptyList()))
+        }
+    }
+    private fun calculateRegistryHashes(registry: AbstractSyncRegistry<*>?): Map<String, String>? {
+        return when (registry) {
+            is SyncRegistry -> {
+                registry.calculateHashes()
+            }
+
+            is PlayerSyncRegistry -> {
+                registry.calculateHashes(registry.getPlayerUUID())
+            }
+
+            else -> null
+        }
+    }
+    private fun unregisterRegistryElement(registry: AbstractSyncRegistry<*>, elementId: String) {
+        when (registry) {
+            is SyncRegistry -> registry.unregister(elementId)
+            is PlayerSyncRegistry -> registry.unregister(registry.getPlayerUUID(), elementId)
         }
     }
 

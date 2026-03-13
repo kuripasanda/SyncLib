@@ -1,6 +1,7 @@
 package com.github.kuripasanda.api.sync
 
 import com.github.kuripasanda.SyncLib
+import com.github.kuripasanda.api.exception.RegistryAlreadyExistsException
 import com.github.kuripasanda.api.network.SplitPacketUtil
 import com.github.kuripasanda.api.network.client.SyncLibRequestRegistryElementC2SPacket
 import com.github.kuripasanda.api.network.server.SyncLibInitializeS2CPacket
@@ -45,8 +46,14 @@ object SyncHelper {
     val SEND_ALL_REGISTRY_ELEMENTS_COMPLETE_MESSAGE_KEY = ResourceLocation.fromNamespaceAndPath(SyncLib.MOD_ID, "send_all_registry_elements_complete")
 
 
+    /** 通常・プレイヤー別などの種別を問わず、同期対象のレジストリの識別子を管理するセット */
+    private val registryKeys = mutableSetOf<ResourceLocation>()
+
     /** 同期対象のレジストリのマップ */
     private val registries = ConcurrentHashMap<ResourceLocation, SyncRegistry<*>>()
+
+    /** プレイヤーごとの同期レジストリのマップ */
+    private val playerRegistries = ConcurrentHashMap<ResourceLocation, PlayerSyncRegistry<*>>()
 
     /** プレイヤーごとの同期状態を管理するマップ */
     private val syncStatus = ConcurrentHashMap<UUID, SyncStatus>()
@@ -91,7 +98,9 @@ object SyncHelper {
      * @param obfuscatedClientSide データをキャッシュする際にクライアント側で難読化するかどうか。trueの場合、キャッシュファイルに保存されるデータは難読化されます。falseの場合、キャッシュファイルに保存されるデータは平文のJSON形式になります。
      * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。 (registry: 登録先のレジストリ、 key: 登録される要素のキー、 data: 登録される予定のデータ)
      * @param onUnregister データがレジストリから削除されたときに呼び出されるコールバック関数。
+     * @throws RegistryAlreadyExistsException 指定されたIDのレジストリがすでに存在する場合にスローされます。
      */
+    @Throws(RegistryAlreadyExistsException::class)
     fun <T: Any> createRegistry(
         id: ResourceLocation,
         serializer: KSerializer<T>,
@@ -99,8 +108,37 @@ object SyncHelper {
         onRegister: (SyncRegistry<T>, String, T) -> T = { registry, key, data -> data },
         onUnregister: (T) -> Unit = {}
     ): SyncRegistry<T> {
+        if (registryKeys.contains(id)) throw RegistryAlreadyExistsException(id)
+
         val registry = SyncRegistry<T>(id, serializer, obfuscatedClientSide, onRegister, onUnregister)
         registries.put(id, registry)
+        registryKeys.add(id)
+        return registry
+    }
+
+    /**
+     * 新しいプレイヤー別の同期レジストリを作成して登録します
+     * @param T 同期対象のデータの型
+     * @param id レジストリの識別子。通常は 「modid:registry_name」 の形式で指定されます。
+     * @param serializer 同期対象のデータをシリアライズ/デシリアライズするためのKSerializer。
+     * @param obfuscatedClientSide データをキャッシュする際にクライアント側で難読化するかどうか。trueの場合、キャッシュファイルに保存されるデータは難読化されます。falseの場合、キャッシュファイルに保存されるデータは平文のJSON形式になります。
+     * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。 (registry: 登録先のレジストリ、 key: 登録される要素のキー、 data: 登録される予定のデータ)
+     * @param onUnregister データがレジストリから削除されたときに呼び出されるコールバック関数。
+     * @throws RegistryAlreadyExistsException 指定されたIDのレジストリがすでに存在する場合にスローされます。
+     */
+    @Throws(RegistryAlreadyExistsException::class)
+    fun <T: Any> createPlayerRegistry(
+        id: ResourceLocation,
+        serializer: KSerializer<T>,
+        obfuscatedClientSide: Boolean,
+        onRegister: (PlayerSyncRegistry<T>, UUID, String, T) -> T = { registry, playerUUID, key, data -> data },
+        onUnregister: (UUID, T) -> Unit = {playerUUID, data -> }
+    ): PlayerSyncRegistry<T> {
+        if (registryKeys.contains(id)) throw RegistryAlreadyExistsException(id)
+
+        val registry = PlayerSyncRegistry<T>(id, serializer, obfuscatedClientSide, onRegister, onUnregister)
+        playerRegistries.put(id, registry)
+        registryKeys.add(id)
         return registry
     }
 
@@ -109,13 +147,13 @@ object SyncHelper {
      * @param id レジストリの識別子
      * @return 指定されたIDの同期レジストリ。存在しない場合はnullを返します。
      */
-    fun getRegistry(id: ResourceLocation): SyncRegistry<*>? = registries[id]
+    fun getRegistry(id: ResourceLocation): AbstractSyncRegistry<*>? = registries[id] ?: playerRegistries[id]
 
     /**
      * 登録されているすべての同期レジストリを取得します
      * @return 登録されているすべての同期レジストリのマップ。キーはレジストリの識別子、値は対応するSyncRegistryのインスタンスです。
      */
-    fun getAllRegistries(): Map<ResourceLocation, SyncRegistry<*>> = HashMap(registries)
+    fun getAllRegistries(): Map<ResourceLocation, AbstractSyncRegistry<*>> = HashMap(registries).plus(HashMap(playerRegistries))
 
     /**
      * 指定されたサーバーIDに対応するキャッシュディレクトリのパスを取得します。
@@ -125,8 +163,8 @@ object SyncHelper {
 
 
     /** クライアントに特定のレジストリ要素のデータを送信します */
-    fun sendRegistryElement(player: ServerPlayer, registry: SyncRegistry<*>, elementId: String) {
-        val elementByteArray = registry.getAsByteArray(elementId) ?: throw IllegalStateException("Requested element $elementId not found in registry ${registry.id}.")
+    fun sendRegistryElement(player: ServerPlayer, registry: AbstractSyncRegistry<*>, elementId: String) {
+        val elementByteArray = getRegistryElementAsByteArray(player.uuid, registry, elementId) ?: throw IllegalStateException("Requested element $elementId not found in registry ${registry.id}.")
         val packet = SyncLibRegistryElementS2CPacket(registry.id, elementId, elementByteArray)
         ServerPlayNetworking.send(player, packet)
     }
@@ -175,7 +213,7 @@ object SyncHelper {
 
 
         init {
-            val sendRegistries = registries.keys.toList()
+            val sendRegistries = getAllRegistries().keys.toList()
             status = SyncStatus(sendRegistries, this, handler)
         }
 
@@ -233,9 +271,9 @@ object SyncHelper {
                     SyncLib.LOGGER.info("[Sync] Sending the requested data to $uuid for $totalElements elements across ${requestedRegistryElements.size} registries.")
                     val time = measureTimeMillis {
                         requestedRegistryElements.forEach { requestRegistryId, requestElementIds ->
-                            val registry = registries[requestRegistryId] ?: throw IllegalStateException("Requested registry $requestRegistryId not found.")
+                            val registry = getRegistry(requestRegistryId) ?: throw IllegalStateException("Requested registry $requestRegistryId not found.")
                             requestElementIds.forEach { elementId ->
-                                val elementByteArray = registry.getAsByteArray(elementId) ?: throw IllegalStateException("Requested element $elementId not found in registry $requestRegistryId.")
+                                val elementByteArray = getRegistryElementAsByteArray(uuid, registry, elementId) ?: throw IllegalStateException("Requested element $elementId not found in registry $requestRegistryId.")
                                 val packet = SyncLibRegistryElementS2CPacket(requestRegistryId, elementId, elementByteArray)
                                 status.handler.send(ServerConfigurationNetworking.createS2CPacket(packet))
                             }
@@ -263,8 +301,8 @@ object SyncHelper {
                 // 全てのレジストリの個々のデータのハッシュ値を計算して、クライアントに送信する
                 val hashes = LinkedHashMap<ResourceLocation, Map<String, String>>()
                 status.sendRegistries.forEach { id ->
-                    val registry = registries[id] ?: return@forEach
-                    val registryHashes = registry.calculateHashes()
+                    val registry = getRegistry(id) ?: return@forEach
+                    val registryHashes = calculateRegistryHashes(uuid, registry)
                     hashes[id] = registryHashes
                 }
 
@@ -323,6 +361,21 @@ object SyncHelper {
         handler.disconnect(errorDisconnectMessage)
         syncStatus.remove(handler.owner.id)
         SyncLib.LOGGER.error("[Sync] Error while starting synchronization for player with UUID ${handler.owner.id}: ${e.message}", e)
+    }
+
+    private fun getRegistryElementAsByteArray(playerUUID: UUID, registry: AbstractSyncRegistry<*>, elementId: String): ByteArray? {
+        return when (registry) {
+            is SyncRegistry -> registry.getAsByteArray(elementId)
+            is PlayerSyncRegistry -> registry.getAsByteArray(playerUUID, elementId)
+            else -> null
+        }
+    }
+    private fun calculateRegistryHashes(playerUUID: UUID, registry: AbstractSyncRegistry<*>): Map<String, String> {
+        return when (registry) {
+            is SyncRegistry -> registry.calculateHashes()
+            is PlayerSyncRegistry -> registry.calculateHashes(playerUUID)
+            else -> emptyMap()
+        }
     }
 
 }

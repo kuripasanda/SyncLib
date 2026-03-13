@@ -3,15 +3,19 @@ package com.github.kuripasanda
 import com.github.kuripasanda.api.network.SyncLibNetworkHelper
 import com.github.kuripasanda.api.obfuscate.EasyObfuscatorImpl
 import com.github.kuripasanda.api.obfuscate.Obfuscator
+import com.github.kuripasanda.api.sync.PlayerSyncRegistry
 import com.github.kuripasanda.api.sync.SyncHelper
 import com.github.kuripasanda.api.sync.SyncRegistry
 import com.github.kuripasanda.config.SyncLibConfigs
+import net.fabricmc.api.EnvType
+import net.fabricmc.api.Environment
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.minecraft.server.MinecraftServer
 import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.UUID
 
 object SyncLib : ModInitializer {
 
@@ -20,11 +24,18 @@ object SyncLib : ModInitializer {
 	val digest = MessageDigest.getInstance("SHA-256")
 	var cacheDir: Path? = null
 
+	@Environment(EnvType.SERVER)
 	var server: MinecraftServer? = null
 		private set
+
+	@Environment(EnvType.CLIENT)
+	var playerUUID: UUID? = null
+
 	lateinit var obfuscator: Obfuscator private set
 
 	var registryOnRegisterForManagement = { registry: SyncRegistry<*>, elementId: String, data: Any -> }
+		private set
+	var playerRegistryOnRegisterForManagement = { registry: PlayerSyncRegistry<*>, playerUUID: UUID, elementId: String, data: Any -> }
 		private set
 
 	fun setObfuscateKey(key: String) {
@@ -61,6 +72,21 @@ object SyncLib : ModInitializer {
 					}
 				}catch (e: Exception) {
 					LOGGER.error("Failed to send registry element to players! registryId: ${registry.id}, elementId: $elementId", e)
+				}
+			}
+
+			playerRegistryOnRegisterForManagement = { registry, playerUUID, elementId, data ->
+				try {
+					// 対象プレイヤーにレジストリの要素の変更を同期
+					val player = SyncLib.server?.playerList?.players?.find { it.uuid == playerUUID }
+					if (player != null) {
+						SyncHelper.sendRegistryElement(player, registry, elementId)
+					}
+				} catch (e: Exception) {
+					LOGGER.error(
+						"Failed to send player registry element to player! playerUUID: $playerUUID, registryId: ${registry.id}, elementId: $elementId",
+						e
+					)
 				}
 			}
 

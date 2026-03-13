@@ -13,6 +13,7 @@ object SyncLibClient : ClientModInitializer {
 
 	override fun onInitializeClient() {
 		SyncLib.cacheDir = Minecraft.getInstance().gameDirectory.resolve("cache/${SyncLib.MOD_ID}/").toPath()
+		SyncLib.playerUUID = Minecraft.getInstance().user.profileId
 
 		// ネットワーキングの初期化
 		SyncLibClientNetworkHelper

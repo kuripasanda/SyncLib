@@ -8,11 +8,12 @@ import net.fabricmc.api.EnvType
 import net.fabricmc.api.Environment
 import net.minecraft.resources.ResourceLocation
 import net.minecraft.server.level.ServerPlayer
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.jvm.Throws
 
 /**
- * 同期可能なデータのレジストリ
+ * プレイヤー別で同期可能なデータのレジストリ
  * @param T 同期対象のデータの型
  * @param id レジストリの識別子。通常は 「modid:registry_name」 の形式で指定されます。
  * @param serializer 同期対象のデータをシリアライズ/デシリアライズするためのKSerializer。
@@ -20,39 +21,40 @@ import kotlin.jvm.Throws
  * @param onRegister データがレジストリに登録される前に呼び出されるコールバック関数。ここで登録されるデータを編集できます。
  * @param onUnregister データがレジストリから削除されたときに呼び出されるコールバック関数。
  */
-class SyncRegistry<T: Any>(
+class PlayerSyncRegistry<T: Any>(
     id: ResourceLocation,
     serializer: KSerializer<T>,
     obfuscatedClientSide: Boolean,
-    var onRegister: (SyncRegistry<T>, String, T) -> T,
-    var onUnregister: (T) -> Unit
+    var onRegister: (PlayerSyncRegistry<T>, UUID, String, T) -> T,
+    var onUnregister: (UUID, T) -> Unit
 ): AbstractSyncRegistry<T>(id, serializer, obfuscatedClientSide) {
 
     /** 同期対象のデータのマップ */
-    private val dataMap: ConcurrentHashMap<String, T> = ConcurrentHashMap()
+    private val dataMap: ConcurrentHashMap<UUID, ConcurrentHashMap<String, T>> = ConcurrentHashMap()
 
 
-    /** レジストリにデータをキーで登録します。既に同じキーが存在する場合は上書きされます。 */
-    fun register(key: String, data: T) {
-        val result = onRegister.invoke(this, key, data)
-        dataMap[key] = result
+    /** プレイヤーのレジストリにデータをキーで登録します。既に同じキーが存在する場合は上書きされます。 */
+    fun register(playerUUID: UUID, key: String, data: T) {
+        val result = onRegister.invoke(this, playerUUID, key, data)
+        val playerDataMap = dataMap.computeIfAbsent(playerUUID) { ConcurrentHashMap() }
+        playerDataMap[key] = data
 
         // データが登録された後の管理用コールバックを呼び出す
-        SyncLib.registryOnRegisterForManagement.invoke(this, key, result)
+        SyncLib.playerRegistryOnRegisterForManagement.invoke(this, playerUUID, key, result)
     }
 
     /**
-     * レジストリにデータをキーで登録します。既に同じキーが存在する場合は上書きされます。
+     * プレイヤーのレジストリにデータをキーで登録します。既に同じキーが存在する場合は上書きされます。
      * ※主にSyncLib内部で使用するメソッドです。
      */
     @Environment(EnvType.CLIENT)
     override fun registerFromByteArray(key: String, bytes: ByteArray) {
         val data = fromByteArray(bytes)
-        register(key, data)
+        register(getPlayerUUID(), key, data)
     }
 
-    /** レジストリにデータをキーで登録します。既に同じキーが存在する場合は上書きされます。
-     * キャッシュファイルからデータを読み込んで登録します。キャッシュファイルが存在しない場合や、キャッシュファイルの内容が無効な場合は例外がスローされます。
+    /** プレイヤーのレジストリにキャッシュファイルからデータを読み込んで登録します。既に同じキーが存在する場合は上書きされます。
+     * キャッシュファイルが存在しない場合や、キャッシュファイルの内容が無効な場合は例外がスローされます。
      * @param serverId サーバーID
      * @param key レジストリ内の要素のキー
      * @param environment 実行している環境
@@ -63,34 +65,37 @@ class SyncRegistry<T: Any>(
     @Environment(EnvType.CLIENT)
     override fun registerFromCacheFile(serverId: String, key: String, environment: EnvType) {
         val data = loadCacheFromFile(serverId, key, environment)
-        register(key, data)
+        register(getPlayerUUID(), key, data)
     }
 
-    /** レジストリからデータをキーで削除します。キーが存在しない場合は何も行いません。 */
-    fun unregister(key: String) {
-        val data = dataMap.remove(key)
-        if (data != null) onUnregister.invoke(data)
+    /** プレイヤーのレジストリからデータをキーで削除します。キーが存在しない場合は何も行いません。 */
+    fun unregister(playerUUID: UUID, key: String) {
+        val data = dataMap[playerUUID]?.remove(key)
+        if (data != null) onUnregister.invoke(playerUUID, data)
     }
 
-    /** レジストリ内のデータをキーで取得します。キーが存在しない場合はnullを返します。 */
-    fun get(key: String): T? = dataMap[key]
+    /** プレイヤーのレジストリ内のデータをキーで取得します。キーが存在しない場合はnullを返します。 */
+    fun get(playerUUID: UUID, key: String): T? = dataMap[playerUUID]?.get(key)
 
-    /** レジストリ内のすべてのデータを取得します。 */
-    fun getAll(): Map<String, T> = dataMap.toMap()
+    /** プレイヤーのレジストリ内のすべてのデータを取得します。 */
+    fun getAll(playerUUID: UUID): Map<String, T> = dataMap[playerUUID]?.toMap() ?: emptyMap()
 
-    /** レジストリ内のデータの数を返します。 */
-    fun getSize(): Int = dataMap.size
+    /** プレイヤーのレジストリ内のデータの数を返します。 */
+    fun getSize(playerUUID: UUID): Int = dataMap[playerUUID]?.size ?: 0
 
     /** レジストリ内に指定されたキーが存在するかどうかを確認します。 */
-    fun contains(key: String): Boolean = dataMap.containsKey(key)
+    fun contains(playerUUID: UUID, key: String): Boolean = dataMap[playerUUID]?.containsKey(key) ?: false
 
-    /** レジストリ内のすべてのデータをクリアします。 */
+    /** 全プレイヤーのレジストリ内のすべてのデータをクリアします。 */
     override fun clear() { dataMap.clear() }
 
-    /** レジストリ内のすべてのデータのハッシュを計算して返します。キーとハッシュのマップとして返されます。 */
-    fun calculateHashes(): Map<String, String> {
+    /** プレイヤーのレジストリ内のすべてのデータをクリアします。 */
+    fun clearPlayer(playerUUID: UUID) { dataMap[playerUUID]?.clear() }
+
+    /** プレイヤーのレジストリ内のすべてのデータのハッシュを計算して返します。キーとハッシュのマップとして返されます。 */
+    fun calculateHashes(playerUUID: UUID): Map<String, String> {
         val result = hashMapOf<String, String>()
-        dataMap.forEach { (key, value) ->
+        dataMap[playerUUID]?.forEach { (key, value) ->
             result[key] = calculateHash(value)
         }
         return result
@@ -107,16 +112,17 @@ class SyncRegistry<T: Any>(
     @Environment(EnvType.CLIENT)
     @Throws(NoSuchElementException::class)
     override fun saveCacheToFile(serverId: String, key: String, environment: EnvType) {
-        val element = dataMap[key] ?: throw NoSuchElementException("Key '$key' not found in registry '${id}'.")
+        val playerUUID = getPlayerUUID()
+        val element = dataMap[playerUUID]?.get(key) ?: throw NoSuchElementException("Key '$key' not found in registry '${id}'.")
         saveCacheToFileInternal(serverId, key, element, environment)
     }
 
     /**
-     * キーで指定されたレジストリ内の要素をバイト配列にシリアライズして返します。要素が存在しない場合はnullを返します。
+     * プレイヤーのキーで指定されたレジストリ内の要素をバイト配列にシリアライズして返します。要素が存在しない場合はnullを返します。
      * シリアライズされたデータはJson形式の文字列をバイト配列に変換したものになります。
      */
-    fun getAsByteArray(key: String): ByteArray? {
-        val data = dataMap[key] ?: return null
+    fun getAsByteArray(playerUUID: UUID, key: String): ByteArray? {
+        val data = dataMap[playerUUID]?.get(key) ?: return null
         val json = Json.encodeToString(serializer, data)
         return json.toByteArray()
     }
@@ -130,8 +136,16 @@ class SyncRegistry<T: Any>(
     @Environment(EnvType.SERVER)
     @Throws(NoSuchElementException::class)
     override fun syncToPlayer(player: ServerPlayer, key: String) {
-        if (contains(key).not()) throw NoSuchElementException("Key '$key' not found in registry '${id}'.")
+        val playerUUID = player.uuid
+        if (contains(playerUUID, key).not()) throw NoSuchElementException("Key '$key' not found in registry '${id}' for player '$playerUUID'.")
         SyncHelper.sendRegistryElement(player, this, key)
     }
+
+
+
+    /** プレイヤーのUUIDを取得します。失敗した場合は[IllegalStateException]がスローされます。 */
+    @Environment(EnvType.CLIENT)
+    @Throws(IllegalStateException::class)
+    fun getPlayerUUID(): UUID = SyncLib.playerUUID ?: throw IllegalStateException("Player UUID is null")
 
 }
