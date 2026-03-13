@@ -8,6 +8,7 @@ import com.github.kuripasanda.api.network.server.SyncLibInitializeS2CPacket
 import com.github.kuripasanda.api.network.server.SyncLibRegistryElementS2CPacket
 import com.github.kuripasanda.api.network.server.SyncLibRegistryHashesS2CPacket
 import com.github.kuripasanda.config.SyncLibConfigs
+import com.github.kuripasanda.synclib.event.ServerSyncLibConfigurationEvent
 import kotlinx.serialization.KSerializer
 import net.fabricmc.api.EnvType
 import net.fabricmc.api.Environment
@@ -22,6 +23,7 @@ import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.network.ConfigurationTask
 import net.minecraft.server.network.ServerConfigurationPacketListenerImpl
 import net.minecraft.util.CommonColors
+import net.minecraft.world.InteractionResult
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -213,8 +215,19 @@ object SyncHelper {
 
 
         init {
-            val sendRegistries = getAllRegistries().keys.toList()
-            status = SyncStatus(sendRegistries, this, handler)
+            val sendRegistries = getAllRegistries()
+            status = SyncStatus(sendRegistries.keys.toList(), this, handler)
+
+            sendRegistries.values.forEach { registry ->
+                try {
+                    val result = ServerSyncLibConfigurationEvent.BEFORE_SYNC.invoker().beforeSync(SyncLib.server, registry, uuid)
+                    if (result != InteractionResult.PASS) {
+                        throw IllegalStateException("[Sync] Sync of registry ${registry.id} for player with UUID $uuid was cancelled by an event listener.")
+                    }
+                }catch (e: Exception) {
+                    errorInSyncing(handler, e)
+                }
+            }
         }
 
         override fun type(): ConfigurationTask.Type = KEY
