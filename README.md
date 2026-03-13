@@ -24,7 +24,7 @@ SyncLibを使用するには、各データ専用の**レジストリ**を作成
 
 ### 1. build.gradle
 自身のプロジェクトの `build.gradle`に [Kotlin Seriaization](https://github.com/Kotlin/kotlinx.serialization/tree/master?tab=readme-ov-file#gradle)を依存関係として追加する必要があります。  
-SyncLibの最新バージョンは `0.2.0` です。
+SyncLibの最新バージョンは `0.3.0` です。
 ```groovy
 plugins {
     id 'org.jetbrains.kotlin.multiplatform' version '2.3.0'
@@ -56,7 +56,11 @@ data class ExampleData(
 ```
 
 ### 2. レジストリの作成
-ヘルパー関数を使用することで、新規作成後、登録されたレジストリのインスタンスを取得できます。
+ヘルパー関数を使用することで、新規作成後、登録されたレジストリのインスタンスを取得できます。  
+また、レジストリは「プレイヤー別でデータが保管・同期されるレジストリ」と「全プレイヤー共通のレジストリ」の二種類が存在します。  
+※レジストリのIDは、レジストリの種類が異なっていても同じものは使用できません。
+
+#### ・全プレイヤー共通のレジストリ(SyncRegistry)
 ```kotlin
 // レジストリを登録
 val exampleDataRegistry = SyncHelper.createRegistry(
@@ -67,12 +71,33 @@ val exampleDataRegistry = SyncHelper.createRegistry(
   onUnregister = { data -> } // データがレジストリから削除されたときに呼び出されるコールバック関数。
 )
 ```
+#### ・プレイヤー別で同期されるレジストリ(PlayerSyncRegistry)
+```kotlin
+val exampleDataPlayerRegistry = SyncHelper.createPlayerRegistry(
+    id = ResourceLocation.fromNamespaceAndPath(SyncLib.MOD_ID, "example_player"),
+    serializer = serializer(),
+    obfuscatedClientSide = true,
+    onRegister = { registry, uuid, key, data -> data },
+    onUnregister = { uuid, data -> }
+)
+```
 
 ### 3. データの登録
-レジストリにデータを登録します。
+レジストリにデータを登録します。  
+
+#### ・全プレイヤー共通のレジストリ(SyncRegistry)
 ```kotlin
 exampleDataRegistry.register(
   "key", // レジストリ内の要素のキー
   ExampleData(id = 1, message = "Hello, world!") // 登録するデータ
+)
+```
+
+#### ・プレイヤー別で同期されるレジストリ(PlayerSyncRegistry)
+```kotlin
+exampleDataPlayerRegistry.register(
+    player.uuid, // プレイヤーのUUID
+    "key", // レジストリ内の要素のキー
+    ExampleData(id = 1, message = "Hello, world!") // 登録するデータ
 )
 ```
