@@ -24,7 +24,7 @@ SyncLibを使用するには、各データ専用の**レジストリ**を作成
 
 ### 1. build.gradle
 自身のプロジェクトの `build.gradle`に [Kotlin Seriaization](https://github.com/Kotlin/kotlinx.serialization/tree/master?tab=readme-ov-file#gradle)を依存関係として追加する必要があります。  
-SyncLibの最新バージョンは `0.3.0` です。
+SyncLibの最新バージョンは `0.3.1` です。
 ```groovy
 plugins {
     id 'org.jetbrains.kotlin.multiplatform' version '2.3.0'
